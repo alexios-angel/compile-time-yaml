@@ -34,6 +34,44 @@
 // no `...` document-end marker (multi-document streams are not
 // supported) - and is_valid includes it.
 
+namespace ctyaml {
+
+// why the binder rejected a document that PARSES - the checks the
+// line-oriented grammar itself cannot express
+CTLL_EXPORT enum class bind_reason : unsigned char {
+	none,
+	bad_escape,    // an invalid escape or code point in a double-quoted scalar
+	duplicate_key, // the same key twice in one mapping
+	doc_end,       // a '...' document-end marker (multi-document streams unsupported)
+	bad_indent     // inconsistent indentation in the block structure
+};
+
+CTLL_EXPORT constexpr std::string_view to_string(bind_reason r) noexcept {
+	switch (r) {
+		case bind_reason::none: return "none";
+		case bind_reason::bad_escape: return "invalid escape in a double-quoted scalar";
+		case bind_reason::duplicate_key: return "duplicate mapping key";
+		case bind_reason::doc_end: return "'...' document-end marker (multi-document streams are not supported)";
+		case bind_reason::bad_indent: return "inconsistent indentation";
+	}
+	return "unknown";
+}
+
+// the first binder failure: which rule broke, and the offending token
+// or key (empty for indentation errors - their location does not
+// survive the type-level block fold; ctyaml::debug::dump_tokens<input>()
+// shows the line structure)
+CTLL_EXPORT struct bind_error_t {
+	bind_reason reason = bind_reason::none;
+	std::string_view where{};
+
+	constexpr bool ok() const noexcept {
+		return reason == bind_reason::none;
+	}
+};
+
+} // namespace ctyaml
+
 namespace ctyaml::detail {
 
 // tree data and token type names, as they appear in the parse tree
@@ -547,6 +585,57 @@ struct seq_entry<I, ctll::list<Is...>, Ok, ctlark::tree<bt_seqitem, ctlark::toke
 	}
 };
 
+// --- the diagnostic pass (behind ctyaml::bind_error): the same checks
+// as the ok fold, but reporting the FIRST failure it can attribute.
+// Escape failures are found in the parse tree, duplicate keys in the
+// BOUND document type (which is built even when ok is false), and the
+// document-end marker in the gather flag; only indentation failures
+// lose their location in the type-level descent and fall back to a
+// bare bad_indent.
+
+template <typename... Fs> constexpr bind_error_t first_fail(Fs... fs) noexcept {
+	const bind_error_t fails[] = {fs..., bind_error_t{}};
+	for (const bind_error_t & f : fails) {
+		if (f.reason != bind_reason::none) { return f; }
+	}
+	return bind_error_t{};
+}
+
+// parse-tree scan: double-quoted scalars whose escapes fail to decode
+template <typename Node> struct scan_node {
+	static constexpr bind_error_t fail{};
+};
+template <typename V> struct scan_node<ctlark::token<bt_DQ, V>> {
+	static constexpr bind_error_t fail =
+		decode_dq<V>::ok ? bind_error_t{} : bind_error_t{bind_reason::bad_escape, V::view()};
+};
+template <typename D, typename... Cs> struct scan_node<ctlark::tree<D, Cs...>> {
+	static constexpr bind_error_t fail = first_fail(scan_node<Cs>::fail...);
+};
+
+// bound-type scan: a mapping with two equal keys (equal content is the
+// same type, so the view comparison is exact)
+template <typename T> struct dup_scan {
+	static constexpr bind_error_t fail{};
+};
+template <typename... Ms> constexpr bind_error_t map_own_dup() noexcept {
+	constexpr size_t n = sizeof...(Ms);
+	const std::string_view keys[] = {Ms::key_type::view()..., std::string_view{}};
+	for (size_t i = 0; i < n; ++i) {
+		for (size_t j = i + 1; j < n; ++j) {
+			if (keys[i] == keys[j]) { return bind_error_t{bind_reason::duplicate_key, keys[j]}; }
+		}
+	}
+	return bind_error_t{};
+}
+template <typename... Is> struct dup_scan<ctyaml::sequence<Is...>> {
+	static constexpr bind_error_t fail = first_fail(dup_scan<Is>::fail...);
+};
+template <typename... Ms> struct dup_scan<ctyaml::mapping<Ms...>> {
+	static constexpr bind_error_t fail =
+		first_fail(map_own_dup<Ms...>(), dup_scan<typename Ms::value_type>::fail...);
+};
+
 // --- the document binder
 
 template <typename Node> struct bind;
@@ -570,6 +659,20 @@ template <typename... Segs> struct bind<ctlark::tree<bt_start, Segs...>> {
 	using type = typename result::type;
 	static constexpr bool ok = result::ok;
 };
+
+// the whole-document diagnosis, in check order (Bound = bind<Tree>)
+template <typename Bound, typename Tree> constexpr bind_error_t doc_fail() noexcept {
+	if constexpr (Bound::ok) {
+		return bind_error_t{};
+	} else {
+		const bind_error_t esc = scan_node<Tree>::fail;
+		if (esc.reason != bind_reason::none) { return esc; }
+		if (!Bound::gathered_t::ok) { return bind_error_t{bind_reason::doc_end, "..."}; }
+		const bind_error_t dup = dup_scan<typename Bound::type>::fail;
+		if (dup.reason != bind_reason::none) { return dup; }
+		return bind_error_t{bind_reason::bad_indent, std::string_view{}};
+	}
+}
 
 } // namespace ctyaml::detail
 

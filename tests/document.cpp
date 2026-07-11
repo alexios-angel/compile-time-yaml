@@ -43,7 +43,8 @@ static_assert(!ctyaml::is_valid<"a: 1\n---\nb: 2">); // multi-document streams
 static_assert(!ctyaml::is_valid<"a: 1\n...">);       // document-end marker
 
 // --- a real document
-constexpr auto doc = ctyaml::parse<R"(# server configuration
+constexpr auto doc = ctyaml::parse<R"(
+# server configuration
 server:
   host: example.com
   ports: [80, 443]
@@ -300,5 +301,53 @@ static_assert(ctyaml::parse<"[0x1F, .inf, true, ~]">()[3].type == ctyaml::kind::
 static_assert(ctyaml::begin(ctyaml::parse<"[]">()) == ctyaml::end(ctyaml::parse<"[]">()));
 
 } // namespace bracket_tests
+
+// --- diagnostics: error_info, error_message, bind_error, debug tools
+
+// valid documents report nothing
+static_assert(ctyaml::error_info<"a: 1\nb: 2">().ok());
+static_assert(ctyaml::error_message<"a: 1\nb: 2">() == ""sv);
+static_assert(ctyaml::bind_error<"a: 1\nb: 2">().ok());
+
+// an unterminated flow sequence: kind, offset, line, column, expected
+constexpr auto unterminated = ctyaml::error_info<"k: [1, 2">();
+static_assert(unterminated.kind == ctlark::error_kind::parse);
+static_assert(unterminated.position == 8 && unterminated.line == 1 && unterminated.column == 9);
+static_assert(ctyaml::error_message<"k: [1, 2">() ==
+              "ctlark: syntax error at line 1, column 9: unexpected end of input\n"
+              "  k: [1, 2\n"
+              "          ^\n"
+              "expected: _WS, ']', ','"sv);
+
+// structural failures name the rule and (where possible) the token
+constexpr auto dup_key = ctyaml::bind_error<"a: 1\na: 2">();
+static_assert(dup_key.reason == ctyaml::bind_reason::duplicate_key);
+static_assert(dup_key.where == "a"sv);
+constexpr auto nested_dup = ctyaml::bind_error<"m:\n  x: 1\n  x: 2">();
+static_assert(nested_dup.reason == ctyaml::bind_reason::duplicate_key && nested_dup.where == "x"sv);
+constexpr auto flow_dup = ctyaml::bind_error<"m: {k: 1, k: 2}">();
+static_assert(flow_dup.reason == ctyaml::bind_reason::duplicate_key && flow_dup.where == "k"sv);
+constexpr auto bad_esc = ctyaml::bind_error<"k: \"bad \\q\"">();
+static_assert(bad_esc.reason == ctyaml::bind_reason::bad_escape);
+static_assert(bad_esc.where == "\"bad \\q\""sv);
+constexpr auto doc_end = ctyaml::bind_error<"a: 1\n...">();
+static_assert(doc_end.reason == ctyaml::bind_reason::doc_end && doc_end.where == "..."sv);
+constexpr auto bad_indent = ctyaml::bind_error<"a: 1\n  b: 2">();
+static_assert(bad_indent.reason == ctyaml::bind_reason::bad_indent);
+
+// the ctlark debugging toolbox with the YAML grammar baked in: the
+// token dump shows the line structure (NL tokens carry the indent)
+static_assert(ctyaml::debug::dump_tokens<"a: 1\n- x">() ==
+              "SCALAR 'a' @0..1\n"
+              "COLON ':' @1..2\n"
+              "_WS ' ' @2..3\n"
+              "SCALAR '1' @3..4\n"
+              "NL '\n' @4..5\n"
+              "DASH '- ' @5..7\n"
+              "SCALAR 'x' @7..8\n"sv);
+constexpr auto traced = ctyaml::debug::traced_parse<"k: [1, 2">();
+static_assert(!traced.ok && traced.error.kind == ctlark::error_kind::parse);
+static_assert(traced.log.events > 0);
+static_assert(ctyaml::debug::dump_grammar().find("terminal DASH") != std::string_view::npos);
 
 #endif

@@ -35,3 +35,19 @@ static_assert([] {
 	}
 	return n;
 }() == 6);
+
+// diagnostics through the variable-form API
+static_assert(ctyaml::error_info<doc_text>().ok());
+static_assert(ctyaml::error_info<bad_text>().ok()); // bad_text PARSES; the binder rejects it
+constexpr auto indent_err = ctyaml::bind_error<bad_text>();
+static_assert(indent_err.reason == ctyaml::bind_reason::bad_indent);
+static constexpr auto dup_text = ctll::fixed_string{"a: 1\na: 2"};
+constexpr auto dup_err = ctyaml::bind_error<dup_text>();
+static_assert(dup_err.reason == ctyaml::bind_reason::duplicate_key);
+static_assert(dup_err.where == std::string_view{"a"});
+static constexpr auto syntax_text = ctll::fixed_string{"k: [1, 2"};
+static_assert(ctyaml::error_info<syntax_text>().kind == ctlark::error_kind::parse);
+static_assert(!ctyaml::error_message<syntax_text>().empty());
+constexpr auto traced = ctyaml::debug::traced_parse<syntax_text>();
+static_assert(!traced.ok && traced.log.events > 0);
+static_assert(!ctyaml::debug::dump_tokens<doc_text>().empty());

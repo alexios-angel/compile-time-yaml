@@ -149,6 +149,42 @@ Details:
   strings, and `yes`/`no`/`on`/`off` (YAML 1.1 legacy) stay strings
   too.
 
+## Debugging
+
+When `is_valid` says `false`, the reason is one query away, computed at
+compile time. Syntax failures carry the location and the expected
+tokens:
+
+```c++
+constexpr auto info = ctyaml::error_info<"k: [1, 2">();
+// info.kind (lex/parse/...), info.position, info.line, info.column
+
+constexpr auto why = ctyaml::error_message<"k: [1, 2">();
+//   ctlark: syntax error at line 1, column 9: unexpected end of input
+//     k: [1, 2
+//             ^
+//   expected: _WS, ']', ','
+```
+
+Documents that PARSE can still fail the structural rules; the binder
+names the rule and, where it survives the fold, the offending token:
+
+```c++
+ctyaml::bind_error<"a: 1\na: 2">();      // duplicate_key, where == "a"
+ctyaml::bind_error<"k: \"bad \\q\"">();  // bad_escape, where == the raw scalar
+ctyaml::bind_error<"a: 1\n...">();       // doc_end
+ctyaml::bind_error<"a: 1\n  b: 2">();    // bad_indent (no location: use dump_tokens)
+```
+
+A failed `parse<>()` names the failing stage and the query to run in
+its `static_assert` message. `ctyaml::debug` bundles the [ctlark
+debugging toolbox](../compile-time-lark#debugging) with the YAML
+grammar baked in: `traced_parse<input>()` (a recorded event log, also
+runnable at runtime under a debugger), `parse_runtime(text)` (runtime
+inputs against the compile-time tables), `dump_tokens<input>()` —
+particularly useful here, since the NL tokens carry each line's
+indentation — and `dump_grammar()`.
+
 ## C++17
 
 With a pre-C++20 compiler, inputs and keys are `constexpr

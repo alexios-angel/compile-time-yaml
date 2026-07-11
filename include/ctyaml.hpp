@@ -62,9 +62,41 @@ template <CTYAML_STRING_INPUT input> constexpr bool valid_document() noexcept {
 CTLL_EXPORT template <CTYAML_STRING_INPUT input> constexpr bool is_valid =
 	detail::valid_document<input>();
 
+// what failed and where, when it does not: kind, byte offset, line,
+// column and the expected terminals (kind none = the syntax is fine)
+CTLL_EXPORT template <CTYAML_STRING_INPUT input> constexpr ctlark::error_info_t error_info() noexcept {
+	return ctlark::error_info<detail::yaml_grammar, input, detail::yaml_start>();
+}
+
+// the rendered diagnostic - location, snippet with a caret, expected
+// terminals - as a static string ("" when the syntax is fine)
+CTLL_EXPORT template <CTYAML_STRING_INPUT input> constexpr std::string_view error_message() noexcept {
+	return ctlark::error_message<detail::yaml_grammar, input, detail::yaml_start>();
+}
+
+// why the binder rejected a document that PARSES - bad escapes,
+// duplicate keys, the '...' marker, or inconsistent indentation;
+// reason none when the document is valid or the syntax already failed
+CTLL_EXPORT template <CTYAML_STRING_INPUT input> constexpr bind_error_t bind_error() noexcept {
+	if constexpr (!ctlark::is_valid<detail::yaml_grammar, input, detail::yaml_start>) {
+		return bind_error_t{};
+	} else {
+		using tree_t = decltype(ctlark::parse<detail::yaml_grammar, input, detail::yaml_start>());
+		return detail::doc_fail<detail::bind<tree_t>, tree_t>();
+	}
+}
+
 // parse the input into its document value; invalid YAML fails to compile
 CTLL_EXPORT template <CTYAML_STRING_INPUT input> constexpr auto parse() noexcept {
-	static_assert(is_valid<input>, "ctyaml: the input is not valid YAML (within the supported subset)");
+#ifdef CTLARK_VERBOSE_ERRORS
+	(void)ctlark::verbose_report<detail::yaml_grammar, input, detail::yaml_start>();
+#endif
+	static_assert(ctlark::is_valid<detail::yaml_grammar, input, detail::yaml_start>,
+	              "ctyaml: the input is not valid YAML syntax (within the supported subset) - print "
+	              "ctyaml::error_message<input>() for the location and the expected tokens");
+	static_assert(!ctlark::is_valid<detail::yaml_grammar, input, detail::yaml_start> || is_valid<input>,
+	              "ctyaml: the input parses but fails a structural rule (indentation, duplicate key, "
+	              "escape, or '...') - print ctyaml::bind_error<input>() for the reason");
 	if constexpr (is_valid<input>) {
 		using bound = detail::bind<decltype(ctlark::parse<detail::yaml_grammar, input, detail::yaml_start>())>;
 		return typename bound::type{};
@@ -72,6 +104,30 @@ CTLL_EXPORT template <CTYAML_STRING_INPUT input> constexpr auto parse() noexcept
 		return null{};
 	}
 }
+
+// the ctlark debugging toolbox with the YAML grammar baked in: traced
+// parses (also runnable at runtime under a debugger), runtime inputs
+// against the compile-time tables, token and grammar dumps
+namespace debug {
+
+CTLL_EXPORT template <CTYAML_STRING_INPUT input, size_t Cap = 4096> constexpr auto traced_parse() noexcept {
+	return ctlark::debug::traced_parse<detail::yaml_grammar, input, detail::yaml_start, Cap>();
+}
+
+CTLL_EXPORT template <CTYAML_STRING_INPUT input> constexpr std::string_view dump_tokens() noexcept {
+	return ctlark::debug::dump_tokens<detail::yaml_grammar, input, detail::yaml_start>();
+}
+
+CTLL_EXPORT constexpr std::string_view dump_grammar() noexcept {
+	return ctlark::debug::dump_grammar<detail::yaml_grammar>();
+}
+
+CTLL_EXPORT template <size_t MaxTokens = 1024>
+ctlark::debug::runtime_result parse_runtime(std::string_view in) {
+	return ctlark::debug::parse_runtime<detail::yaml_grammar, MaxTokens>(in, "start");
+}
+
+} // namespace debug
 
 } // namespace ctyaml
 
