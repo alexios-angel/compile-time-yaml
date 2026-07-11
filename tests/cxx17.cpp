@@ -18,22 +18,14 @@ static_assert(ctyaml::serialize(doc) == std::string_view{"{server: {port: 8080, 
 
 void empty_symbol() { }
 
-// operator[] needs no C++20: keys from for_each and _i indexes are types
-using namespace ctyaml::literals;
-
+// operator[] takes plain keys and indexes, in any standard
 static constexpr auto seq_text = ctll::fixed_string{"[10, 20, 30]"};
 constexpr auto seq = ctyaml::parse<seq_text>();
-static_assert(seq[1_i].template to<int>() == 20);
-
-static_assert([] {
-	int hits = 0;
-	ctyaml::for_each(doc, [&](auto key, auto) {
-		if (doc[key].type == ctyaml::kind::mapping) {
-			++hits;
-		}
-	});
-	return hits;
-}() == 1);
+static_assert(seq[1].to<int>() == 20);
+static_assert(doc["server"]["port"].to<int>() == 8080);
+static_assert(doc["server"]["tags"][1] == std::string_view{"b"});
+static_assert(doc["server"]["missing"].type == ctyaml::kind::null);
+static_assert(!doc.contains("missing"));
 
 // iteration: uniform views, range-for, constexpr
 static_assert([] {

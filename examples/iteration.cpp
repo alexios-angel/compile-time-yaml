@@ -1,16 +1,14 @@
-// Brackets and iteration: operator[] is get spelled the familiar way -
-// the key or index rides in the argument's TYPE - and begin/end give
-// every container uniform views (kind + text) out of static storage,
-// so range-for and <algorithm> work over a document whose elements all
-// have different types.
+// Brackets and iteration: operator[] takes plain keys and indexes and
+// returns uniform VIEWS (kind + text + children) out of static
+// storage, chaining to any depth - and begin/end make every container
+// an ordinary range, so range-for and <algorithm> work over a document
+// whose elements all have different types.
 //
 // Build: make iteration
 
 #include <ctyaml.hpp>
 #include <algorithm>
 #include <iostream>
-
-using namespace ctyaml::literals;
 
 constexpr auto pipeline = ctyaml::parse<R"(# build pipeline
 name: ctyaml
@@ -24,10 +22,10 @@ notify:
 
 // --- operator[]: get, spelled with brackets, chains included
 
-static_assert(pipeline["name"_k] == "ctyaml");
-static_assert(pipeline["stages"_k][2_i] == "test");
-static_assert(pipeline["notify"_k]["channel"_k] == "#builds");
-static_assert(pipeline["timeout"_k].to<int>() == 90);
+static_assert(pipeline["name"] == "ctyaml");
+static_assert(pipeline["stages"][2] == "test");
+static_assert(pipeline["notify"]["channel"] == "#builds");
+static_assert(pipeline["timeout"].to<int>() == 90);
 
 // --- iteration: uniform views make a document an ordinary range
 
@@ -42,7 +40,7 @@ static_assert(longest.key == "timeout");
 // mishandles this loop inside a constexpr lambda)
 constexpr size_t stage_chars() noexcept {
 	size_t total = 0;
-	for (const auto & v : pipeline["stages"_k]) {
+	for (const auto & v : pipeline["stages"]) {
 		total += v.text.size(); // strings view their content
 	}
 	return total;
@@ -59,7 +57,7 @@ int main() {
 	}
 
 	std::cout << "\nstages:";
-	for (const auto & v : pipeline["stages"_k]) {
+	for (const auto & v : pipeline["stages"]) {
 		std::cout << ' ' << v.text;
 	}
 	std::cout << "\n";

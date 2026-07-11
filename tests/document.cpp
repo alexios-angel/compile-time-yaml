@@ -222,16 +222,23 @@ static_assert(ctyaml::parse<"--- a: 1\n">().get<"a">().to<int>() == 1);
 
 namespace bracket_tests {
 
-using namespace ctyaml::literals;
-
 constexpr auto d = ctyaml::parse<"name: Hana\ntags: [regex, ct]\nn: 42\n">();
 
-// [] is get, with the key or index carried in the argument's type
-static_assert(d["name"_k] == "Hana"sv);
-static_assert(d["tags"_k][1_i] == "ct"sv);
-static_assert(d["n"_k].to<int>() == 42);
+// [] navigates with plain keys and indexes, returning uniform views
+static_assert(d["name"] == "Hana"sv);
+static_assert(d["tags"][1] == "ct");
+static_assert(d["n"].to<int>() == 42);
+static_assert(d["tags"].size() == 2);
+static_assert(d["tags"][0].type == ctyaml::kind::string);
+static_assert(d[0] == "Hana"); // mappings index positionally, like value<N>()
 
-// keys handed out by for_each work as [] arguments too
+// misses are null views, so chains are safe; contains() asks first
+static_assert(d["missing"].type == ctyaml::kind::null);
+static_assert(d["missing"]["deep"][7].type == ctyaml::kind::null);
+static_assert(d.contains("name"));
+static_assert(!d.contains("missing"));
+
+// keys a for_each hands out convert to string_view and work in []
 static_assert([] {
 	size_t named = 0;
 	ctyaml::for_each(d, [&](auto key, auto value) {
@@ -242,7 +249,7 @@ static_assert([] {
 	return named;
 }() == 3);
 
-// begin/end yield uniform views from static storage: range-for works,
+// begin/end yield the same views from static storage: range-for works,
 // in constexpr evaluation included
 static_assert([] {
 	size_t key_chars = 0;
@@ -262,21 +269,32 @@ static_assert([] {
 	return false;
 }());
 
-static_assert([] {
-	size_t text_chars = 0;
-	for (const auto & v : d["tags"_k]) {
-		text_chars += v.text.size(); // strings view their content
+// a view is itself a range (gcc 10 wants this loop in a named function
+// rather than a constexpr lambda)
+constexpr size_t tag_chars() noexcept {
+	size_t total = 0;
+	for (const auto & v : d["tags"]) {
+		total += v.text.size(); // strings view their content
 	}
-	return text_chars;
-}() == 5 + 2);
+	return total;
+}
+static_assert(tag_chars() == 5 + 2);
+
+// a mapping view iterates with items()
+constexpr size_t item_chars() noexcept {
+	constexpr auto nested = ctyaml::parse<"outer:\n  a: 1\n  bb: 2\n">();
+	size_t total = 0;
+	for (const auto & m : nested["outer"].items()) {
+		total += m.key.size();
+	}
+	return total;
+}
+static_assert(item_chars() == 1 + 2);
 
 // scalar views: numbers keep their spelling, booleans and null their literals
-static_assert([] {
-	constexpr auto seq = ctyaml::parse<"[0x1F, .inf, true, ~]">();
-	auto it = ctyaml::begin(seq);
-	return it[0].text == "0x1F" && it[1].text == ".inf" && it[2].text == "true"
-	    && it[3].text == "null" && it[3].type == ctyaml::kind::null;
-}());
+static_assert(ctyaml::parse<"[0x1F, .inf, true, ~]">()[0].text == "0x1F"sv);
+static_assert(ctyaml::parse<"[0x1F, .inf, true, ~]">()[1].to<double>() > 1e308);
+static_assert(ctyaml::parse<"[0x1F, .inf, true, ~]">()[3].type == ctyaml::kind::null);
 
 // empty containers iterate zero times
 static_assert(ctyaml::begin(ctyaml::parse<"[]">()) == ctyaml::end(ctyaml::parse<"[]">()));

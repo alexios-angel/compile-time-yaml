@@ -7,7 +7,6 @@
 #include <limits>
 #include <string_view>
 #include <type_traits>
-#include <utility>
 #endif
 
 // The document types a parse produces. The whole document is a TYPE -
@@ -33,73 +32,12 @@ CTLL_EXPORT enum class kind {
 	null
 };
 
-// --- string
+namespace detail {
 
-CTLL_EXPORT template <auto... Chars> struct string {
-	static constexpr kind type = kind::string;
-
-	// null-terminated so c_str()/data() work as C strings; size() excludes it
-	static constexpr char storage[sizeof...(Chars) + 1]{static_cast<char>(Chars)..., '\0'};
-
-	static constexpr const char * c_str() noexcept {
-		return storage;
-	}
-
-	static constexpr size_t size() noexcept {
-		return sizeof...(Chars);
-	}
-	static constexpr bool empty() noexcept {
-		return sizeof...(Chars) == 0;
-	}
-	static constexpr std::string_view view() noexcept {
-		return std::string_view{storage, sizeof...(Chars)};
-	}
-	constexpr operator std::string_view() const noexcept {
-		return view();
-	}
-	template <auto... Rhs> constexpr bool operator==(string<Rhs...>) const noexcept {
-		return view() == string<Rhs...>::view();
-	}
-	friend constexpr bool operator==(string, std::string_view rhs) noexcept {
-		return view() == rhs;
-	}
-	friend constexpr bool operator==(std::string_view lhs, string) noexcept {
-		return lhs == view();
-	}
-};
-
-// --- number (raw spelling, converted on demand; YAML 1.2 core schema)
-
-CTLL_EXPORT template <auto... Chars> struct number {
-	static constexpr kind type = kind::number;
-
-	// null-terminated so c_str() works as a C string; view() excludes it
-	static constexpr char storage[sizeof...(Chars) + 1]{static_cast<char>(Chars)..., '\0'};
-
-	static constexpr const char * c_str() noexcept {
-		return storage;
-	}
-
-	static constexpr std::string_view view() noexcept {
-		return std::string_view{storage, sizeof...(Chars)};
-	}
-
-	static constexpr bool is_integer() noexcept {
-		constexpr std::string_view text = view();
-		// hex and octal are integers whatever letters they contain
-		if (text.size() > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'o')) {
-			return true;
-		}
-		for (const char c : text) {
-			if (c == '.' || c == 'e' || c == 'E') {
-				return false;
-			}
-		}
-		return true;
-	}
-
-	template <typename T> static constexpr T to() noexcept {
-		constexpr std::string_view text = view();
+// the conversion behind number::to and value_view::to: YAML 1.2 core
+// schema spellings - sign, .inf/.nan, hex, octal, decimal with
+// fraction and exponent - parsed from their text
+template <typename T> constexpr T to_arithmetic(std::string_view text) noexcept {
 		size_t i = 0;
 		bool negative = false;
 		if (text[0] == '+' || text[0] == '-') {
@@ -184,6 +122,78 @@ CTLL_EXPORT template <auto... Chars> struct number {
 			return static_cast<T>(negative ? -value : value);
 		}
 	}
+
+} // namespace detail
+
+// --- string
+
+CTLL_EXPORT template <auto... Chars> struct string {
+	static constexpr kind type = kind::string;
+
+	// null-terminated so c_str()/data() work as C strings; size() excludes it
+	static constexpr char storage[sizeof...(Chars) + 1]{static_cast<char>(Chars)..., '\0'};
+
+	static constexpr const char * c_str() noexcept {
+		return storage;
+	}
+
+	static constexpr size_t size() noexcept {
+		return sizeof...(Chars);
+	}
+	static constexpr bool empty() noexcept {
+		return sizeof...(Chars) == 0;
+	}
+	static constexpr std::string_view view() noexcept {
+		return std::string_view{storage, sizeof...(Chars)};
+	}
+	constexpr operator std::string_view() const noexcept {
+		return view();
+	}
+	template <auto... Rhs> constexpr bool operator==(string<Rhs...>) const noexcept {
+		return view() == string<Rhs...>::view();
+	}
+	friend constexpr bool operator==(string, std::string_view rhs) noexcept {
+		return view() == rhs;
+	}
+	friend constexpr bool operator==(std::string_view lhs, string) noexcept {
+		return lhs == view();
+	}
+};
+
+// --- number (raw spelling, converted on demand; YAML 1.2 core schema)
+
+CTLL_EXPORT template <auto... Chars> struct number {
+	static constexpr kind type = kind::number;
+
+	// null-terminated so c_str() works as a C string; view() excludes it
+	static constexpr char storage[sizeof...(Chars) + 1]{static_cast<char>(Chars)..., '\0'};
+
+	static constexpr const char * c_str() noexcept {
+		return storage;
+	}
+
+	static constexpr std::string_view view() noexcept {
+		return std::string_view{storage, sizeof...(Chars)};
+	}
+
+	static constexpr bool is_integer() noexcept {
+		constexpr std::string_view text = view();
+		// hex and octal are integers whatever letters they contain
+		if (text.size() > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'o')) {
+			return true;
+		}
+		for (const char c : text) {
+			if (c == '.' || c == 'e' || c == 'E') {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	template <typename T> static constexpr T to() noexcept {
+		return detail::to_arithmetic<T>(view());
+
+	}
 };
 
 // --- boolean and null
@@ -199,6 +209,136 @@ CTLL_EXPORT template <bool Value> struct boolean {
 CTLL_EXPORT struct null {
 	static constexpr kind type = kind::null;
 };
+
+// --- uniform views: the type behind doc["key"] and seq[1]
+//
+// The elements of one container all have different types, so a runtime
+// key or index cannot select an element ITSELF - operator[] hands back
+// a VIEW: the kind, the text, and spans over the children, everything
+// pointing into static storage (views.hpp builds it). Views chain -
+// doc["users"][0]["name"] - a miss is a null view rather than an error
+// (the null-object pattern of any dynamic API), and it is all still
+// constexpr. get<...>() remains the typed accessor.
+
+CTLL_EXPORT struct member_view;
+CTLL_EXPORT struct member_range;
+
+CTLL_EXPORT struct value_view {
+	ctyaml::kind type = kind::null;
+	std::string_view text{"null"};
+	const member_view * member_data = nullptr;
+	const value_view * element_data = nullptr;
+	size_t child_count = 0;
+
+	constexpr size_t size() const noexcept {
+		return child_count;
+	}
+	constexpr bool empty() const noexcept {
+		return child_count == 0;
+	}
+	constexpr std::string_view view() const noexcept {
+		return text;
+	}
+
+	// numbers convert on demand, exactly like the typed number::to
+	template <typename T> constexpr T to() const noexcept {
+		return detail::to_arithmetic<T>(text);
+	}
+
+	constexpr value_view operator[](std::string_view key) const noexcept; // mappings
+	constexpr value_view operator[](size_t index) const noexcept;        // sequences (mappings: positional)
+	constexpr bool contains(std::string_view key) const noexcept;
+	constexpr member_range items() const noexcept; // a mapping view's key/value pairs
+
+	// the elements of a sequence view (use items() for a mapping view)
+	constexpr const value_view * begin() const noexcept {
+		return element_data;
+	}
+	constexpr const value_view * end() const noexcept {
+		return element_data + (element_data ? child_count : 0);
+	}
+
+	friend constexpr bool operator==(value_view lhs, std::string_view rhs) noexcept {
+		return lhs.text == rhs;
+	}
+	friend constexpr bool operator==(std::string_view lhs, value_view rhs) noexcept {
+		return lhs == rhs.text;
+	}
+#if __cplusplus < 202002L
+	friend constexpr bool operator!=(value_view lhs, std::string_view rhs) noexcept {
+		return lhs.text != rhs;
+	}
+	friend constexpr bool operator!=(std::string_view lhs, value_view rhs) noexcept {
+		return lhs != rhs.text;
+	}
+#endif
+};
+
+CTLL_EXPORT struct member_view {
+	std::string_view key;
+	value_view value;
+};
+
+CTLL_EXPORT struct member_range {
+	const member_view * from = nullptr;
+	const member_view * upto = nullptr;
+	constexpr const member_view * begin() const noexcept {
+		return from;
+	}
+	constexpr const member_view * end() const noexcept {
+		return upto;
+	}
+	constexpr size_t size() const noexcept {
+		return static_cast<size_t>(upto - from);
+	}
+	constexpr bool empty() const noexcept {
+		return from == upto;
+	}
+};
+
+constexpr value_view value_view::operator[](std::string_view key) const noexcept {
+	if (type == kind::mapping) {
+		for (size_t i = 0; i < child_count; ++i) {
+			if (member_data[i].key == key) {
+				return member_data[i].value;
+			}
+		}
+	}
+	return value_view{};
+}
+
+constexpr value_view value_view::operator[](size_t index) const noexcept {
+	if (type == kind::sequence && index < child_count) {
+		return element_data[index];
+	}
+	if (type == kind::mapping && index < child_count) {
+		return member_data[index].value;
+	}
+	return value_view{};
+}
+
+constexpr bool value_view::contains(std::string_view key) const noexcept {
+	if (type != kind::mapping) {
+		return false;
+	}
+	for (size_t i = 0; i < child_count; ++i) {
+		if (member_data[i].key == key) {
+			return true;
+		}
+	}
+	return false;
+}
+
+constexpr member_range value_view::items() const noexcept {
+	return {member_data, member_data + (member_data ? child_count : 0)};
+}
+
+namespace detail {
+
+// the view of one document node, out of static storage (views.hpp)
+template <typename Node> constexpr value_view view_of() noexcept;
+
+} // namespace detail
 
 // --- sequence
 
@@ -217,10 +357,10 @@ CTLL_EXPORT template <typename... Values> struct sequence {
 		return nth<Index, Values...>();
 	}
 
-	// get, spelled with brackets: the index rides in the argument's type
-	// (ctyaml::literals: seq[1_i])
-	template <size_t Index> constexpr auto operator[](std::integral_constant<size_t, Index>) const noexcept {
-		return get<Index>();
+	// get, spelled with brackets: seq[1] descends into a uniform VIEW of
+	// the element (chains and misses are null-safe; get<N>() stays typed)
+	constexpr value_view operator[](size_t index) const noexcept {
+		return detail::view_of<sequence>()[index];
 	}
 
 private:
@@ -272,12 +412,19 @@ CTLL_EXPORT template <typename... Members> struct mapping {
 	}
 #endif
 
-	// get, spelled with brackets: the key is a document string TYPE, so
-	// this works with the "..."_k literal (C++20) and with any key a
-	// for_each hands out, in any standard
-	template <auto... Chars> constexpr auto operator[](string<Chars...>) const noexcept {
-		static_assert((string_key_matches<string<Chars...>, Members>() || ...), "ctyaml: no member with this key");
-		return find_string_key<string<Chars...>, Members...>();
+	// get, spelled with brackets: doc["key"] descends into a uniform VIEW
+	// of the value (chains and misses are null-safe; get<"key">() stays
+	// typed); an index is positional, like value<N>()
+	constexpr value_view operator[](std::string_view key) const noexcept {
+		return detail::view_of<mapping>()[key];
+	}
+	constexpr value_view operator[](size_t index) const noexcept {
+		return detail::view_of<mapping>()[index];
+	}
+
+	// runtime keys; contains<"key">() is the typed twin
+	constexpr bool contains(std::string_view key) const noexcept {
+		return detail::view_of<mapping>().contains(key);
 	}
 
 	// positional access, for iterating members
@@ -327,18 +474,6 @@ private:
 			return nth<Index - 1, Tail...>();
 		}
 	}
-
-	template <typename Key, typename Member> static constexpr bool string_key_matches() noexcept {
-		return Key::view() == Member::key_type::view();
-	}
-
-	template <typename Key, typename Head, typename... Tail> static constexpr auto find_string_key() noexcept {
-		if constexpr (string_key_matches<Key, Head>()) {
-			return typename Head::value_type{};
-		} else {
-			return find_string_key<Key, Tail...>();
-		}
-	}
 };
 
 // compile-time iteration: the callable is invoked once per element
@@ -350,46 +485,6 @@ CTLL_EXPORT template <typename F, typename... Values> constexpr void for_each(se
 CTLL_EXPORT template <typename F, typename... Members> constexpr void for_each(mapping<Members...>, F && f) {
 	(f(typename Members::key_type{}, typename Members::value_type{}), ...);
 }
-
-// --- literal suffixes: keys and indexes as types, for operator[]
-
-namespace detail {
-
-#if CTLL_CNTTP_COMPILER_CHECK
-template <ctll::fixed_string S, size_t... I> constexpr auto lift_key(std::index_sequence<I...>) noexcept {
-	return string<static_cast<char>(S[I])...>{};
-}
-#endif
-
-template <char... Digits> constexpr size_t parse_index() noexcept {
-	constexpr char digits[]{Digits...};
-	size_t value = 0;
-	for (const char c : digits) {
-		if (c != '\'') { // the digit separator
-			value = value * 10 + static_cast<size_t>(c - '0');
-		}
-	}
-	return value;
-}
-
-} // namespace detail
-
-// opt in with `using namespace ctyaml::literals`
-namespace literals {
-
-#if CTLL_CNTTP_COMPILER_CHECK
-// "name"_k: the key as a document string type - doc["name"_k]
-CTLL_EXPORT template <ctll::fixed_string S> constexpr auto operator""_k() noexcept {
-	return detail::lift_key<S>(std::make_index_sequence<S.size()>{});
-}
-#endif
-
-// 1_i: an index as an integral constant - seq[1_i]
-CTLL_EXPORT template <char... Digits> constexpr auto operator""_i() noexcept {
-	return std::integral_constant<size_t, detail::parse_index<Digits...>()>{};
-}
-
-} // namespace literals
 
 } // namespace ctyaml
 

@@ -83,8 +83,8 @@ template <ctll::fixed_string input> constexpr auto ctyaml::parse();
 
 | Type | Accessors |
 |------|-----------|
-| `mapping<members...>` | `get<"key">()`, `["key"_k]`, `contains<"key">()`, `size()`, `empty()`, positional `key<N>()` / `value<N>()`, range-for over member views |
-| `sequence<values...>` | `get<N>()`, `[N_i]`, `size()`, `empty()`, range-for over value views |
+| `mapping<members...>` | `get<"key">()`, `["key"]`, `contains<"key">()`, `size()`, `empty()`, positional `key<N>()` / `value<N>()`, range-for over member views |
+| `sequence<values...>` | `get<N>()`, `[N]`, `size()`, `empty()`, range-for over value views |
 | `string<chars...>` | `view()`, `c_str()` (null-terminated), `size()`, `empty()`, `==` with `std::string_view` |
 | `number<chars...>` | `to<T>()` for any arithmetic `T`, `is_integer()`, `view()` (raw spelling), `c_str()` |
 | `boolean<B>` | `value`, `operator bool` |
@@ -112,28 +112,28 @@ same document.
 Brackets and iteration:
 
 ```c++
-using namespace ctyaml::literals;
+config["service"];                         // get, spelled the familiar way
+config["endpoints"][1]["port"].to<int>(); // chains, to any depth
+config.contains("service");                // runtime keys
 
-config["service"_k];             // get<"service">(), spelled with brackets
-config["endpoints"_k][1_i];      // the key or index rides in the argument's TYPE
-ctyaml::for_each(config, [](auto key, auto) { defaults[key]; });  // keys are types too
-
-// begin/end yield uniform views (kind + text) from static storage, so
-// range-for and algorithms work - in constexpr evaluation included:
+// begin/end yield the same views from static storage, so range-for and
+// algorithms work - in constexpr evaluation included:
 for (const auto & m : config) {
     m.key;          // std::string_view
     m.value.type;   // ctyaml::kind
     m.value.text;   // string content, number spellings, flow-style containers
 }
+for (const auto & v : config["stages"]) { /* a view is a range */ }
+for (const auto & m : config["notify"].items()) { /* key/value pairs */ }
 ```
 
-`operator[]` is `get` under a different spelling: elements have distinct
-types, so the key or index must be a *type* — `"..."_k` (C++20) and any
-key `for_each` hands out, or `N_i` for sequences (both `_i` and key
-objects work in C++17). Iterators hand out *views* for the same reason;
-when you need the element itself, with its own accessors, `for_each` is
-the tool. The records are `value_view` and `member_view`
-([`views.hpp`](include/ctyaml/views.hpp)), and
+Elements of one document all have different types, so `operator[]` with
+a runtime key or index cannot return the element itself: it returns a
+`value_view` — the kind, the text and the children, still fully
+constexpr. A miss is a *null view* (`kind::null`), so chains are safe
+and `contains` asks first; `get<...>()` remains the typed accessor and
+`for_each` the type-preserving iteration. The records are `value_view`
+and `member_view` ([`views.hpp`](include/ctyaml/views.hpp)), and
 [`examples/iteration.cpp`](examples/iteration.cpp) is a runnable tour.
 
 Details:
