@@ -83,8 +83,8 @@ template <ctll::fixed_string input> constexpr auto ctyaml::parse();
 
 | Type | Accessors |
 |------|-----------|
-| `mapping<members...>` | `get<"key">()`, `contains<"key">()`, `size()`, `empty()`, positional `key<N>()` / `value<N>()` |
-| `sequence<values...>` | `get<N>()`, `size()`, `empty()` |
+| `mapping<members...>` | `get<"key">()`, `["key"_k]`, `contains<"key">()`, `size()`, `empty()`, positional `key<N>()` / `value<N>()`, range-for over member views |
+| `sequence<values...>` | `get<N>()`, `[N_i]`, `size()`, `empty()`, range-for over value views |
 | `string<chars...>` | `view()`, `c_str()` (null-terminated), `size()`, `empty()`, `==` with `std::string_view` |
 | `number<chars...>` | `to<T>()` for any arithmetic `T`, `is_integer()`, `view()` (raw spelling), `c_str()` |
 | `boolean<B>` | `value`, `operator bool` |
@@ -132,7 +132,9 @@ types, so the key or index must be a *type* — `"..."_k` (C++20) and any
 key `for_each` hands out, or `N_i` for sequences (both `_i` and key
 objects work in C++17). Iterators hand out *views* for the same reason;
 when you need the element itself, with its own accessors, `for_each` is
-the tool.
+the tool. The records are `value_view` and `member_view`
+([`views.hpp`](include/ctyaml/views.hpp)), and
+[`examples/iteration.cpp`](examples/iteration.cpp) is a runnable tour.
 
 Details:
 
