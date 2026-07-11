@@ -109,6 +109,31 @@ string and double-quoted with escapes otherwise, and numbers with the
 spelling they were parsed with — the output always re-parses to the
 same document.
 
+Brackets and iteration:
+
+```c++
+using namespace ctyaml::literals;
+
+config["service"_k];             // get<"service">(), spelled with brackets
+config["endpoints"_k][1_i];      // the key or index rides in the argument's TYPE
+ctyaml::for_each(config, [](auto key, auto) { defaults[key]; });  // keys are types too
+
+// begin/end yield uniform views (kind + text) from static storage, so
+// range-for and algorithms work - in constexpr evaluation included:
+for (const auto & m : config) {
+    m.key;          // std::string_view
+    m.value.type;   // ctyaml::kind
+    m.value.text;   // string content, number spellings, flow-style containers
+}
+```
+
+`operator[]` is `get` under a different spelling: elements have distinct
+types, so the key or index must be a *type* — `"..."_k` (C++20) and any
+key `for_each` hands out, or `N_i` for sequences (both `_i` and key
+objects work in C++17). Iterators hand out *views* for the same reason;
+when you need the element itself, with its own accessors, `for_each` is
+the tool.
+
 Details:
 
 * String content is stored as UTF-8 bytes; double-quote escapes are
@@ -173,7 +198,7 @@ target carries the compiler-specific limit flags automatically
 (`CTYAML_CONSTEXPR_LIMITS`, default ON) and the Makefiles set them:
 
 ```
-clang:  -fconstexpr-steps=500000000 -fconstexpr-depth=1024
+clang:  -fconstexpr-steps=500000000 -fconstexpr-depth=1024 -fbracket-depth=2048
 gcc:    -fconstexpr-ops-limit=3000000000 -fconstexpr-loop-limit=10000000 -fconstexpr-depth=1024
 ```
 

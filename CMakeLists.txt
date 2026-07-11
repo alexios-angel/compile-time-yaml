@@ -59,6 +59,7 @@ set(CTYAML_HEADERS
 	include/ctyaml/grammar.hpp
 	include/ctyaml/serialize.hpp
 	include/ctyaml/types.hpp
+	include/ctyaml/views.hpp
 	include/ctlark.hpp
 	include/ctlark/actions.hpp
 	include/ctlark/ast.hpp

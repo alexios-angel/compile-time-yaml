@@ -215,3 +215,72 @@ static_assert(ctyaml::parse<"---\na: 1\n">().get<"a">().to<int>() == 1);
 static_assert(ctyaml::parse<"--- a: 1\n">().get<"a">().to<int>() == 1);
 
 #endif
+
+// --- operator[] and iterators (see include/ctyaml/views.hpp)
+
+#if CTLL_CNTTP_COMPILER_CHECK
+
+namespace bracket_tests {
+
+using namespace ctyaml::literals;
+
+constexpr auto d = ctyaml::parse<"name: Hana\ntags: [regex, ct]\nn: 42\n">();
+
+// [] is get, with the key or index carried in the argument's type
+static_assert(d["name"_k] == "Hana"sv);
+static_assert(d["tags"_k][1_i] == "ct"sv);
+static_assert(d["n"_k].to<int>() == 42);
+
+// keys handed out by for_each work as [] arguments too
+static_assert([] {
+	size_t named = 0;
+	ctyaml::for_each(d, [&](auto key, auto value) {
+		if (d[key].type == decltype(value)::type) {
+			++named;
+		}
+	});
+	return named;
+}() == 3);
+
+// begin/end yield uniform views from static storage: range-for works,
+// in constexpr evaluation included
+static_assert([] {
+	size_t key_chars = 0;
+	for (const auto & m : d) {
+		key_chars += m.key.size();
+	}
+	return key_chars;
+}() == 4 + 4 + 1);
+
+static_assert([] {
+	for (const auto & m : d) {
+		if (m.key == "tags") {
+			// nested containers view their flow-style serialization
+			return m.value.type == ctyaml::kind::sequence && m.value.text == "[regex, ct]";
+		}
+	}
+	return false;
+}());
+
+static_assert([] {
+	size_t text_chars = 0;
+	for (const auto & v : d["tags"_k]) {
+		text_chars += v.text.size(); // strings view their content
+	}
+	return text_chars;
+}() == 5 + 2);
+
+// scalar views: numbers keep their spelling, booleans and null their literals
+static_assert([] {
+	constexpr auto seq = ctyaml::parse<"[0x1F, .inf, true, ~]">();
+	auto it = ctyaml::begin(seq);
+	return it[0].text == "0x1F" && it[1].text == ".inf" && it[2].text == "true"
+	    && it[3].text == "null" && it[3].type == ctyaml::kind::null;
+}());
+
+// empty containers iterate zero times
+static_assert(ctyaml::begin(ctyaml::parse<"[]">()) == ctyaml::end(ctyaml::parse<"[]">()));
+
+} // namespace bracket_tests
+
+#endif

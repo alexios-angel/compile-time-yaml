@@ -6,6 +6,7 @@
 #include "ctyaml/types.hpp"
 #include "ctyaml/bind.hpp"
 #include "ctyaml/serialize.hpp"
+#include "ctyaml/views.hpp"
 
 // ctyaml: compile-time YAML.
 //
