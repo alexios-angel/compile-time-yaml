@@ -1,14 +1,10 @@
-.PHONY: default all clean grammar regrammar pch single-header single-header/ctyaml.hpp
+.PHONY: default all clean pch single-header single-header/ctyaml.hpp
 
 default: all
 
 CXX_STANDARD := 20
 
 PYTHON := python3
-
-# LL1q parser generator: https://github.com/alexios-angel/Tablewright
-# (needs python3 with the lark package)
-TABLEWRIGHT := tablewright
 
 # Earley at compile time needs more constexpr budget than the defaults
 CXX_IS_CLANG := $(shell $(CXX) --version 2>/dev/null | grep -qi clang && echo yes)
@@ -18,7 +14,18 @@ else
 CONSTEXPR_FLAGS := -fconstexpr-ops-limit=3000000000 -fconstexpr-loop-limit=10000000 -fconstexpr-depth=1024
 endif
 
-override CXXFLAGS := $(CXXFLAGS) -std=c++$(CXX_STANDARD) -Iinclude $(CONSTEXPR_FLAGS) -O2 -pedantic -Wall -Wextra -Werror -Wconversion
+# ctlark and ctll come from a git submodule (run `git submodule update
+# --init` once after cloning). The extra <sub>/include/ctlark and
+# <sub>/include/ctll entries let the headers' relative
+# `"../ctlark.hpp"`-style includes resolve through the quoted-include
+# -I fallback (the compiler appends the literal "../ctlark.hpp" to
+# each -I dir).
+SUBMODULE_INCLUDES := \
+	-Iexternal/compile-time-lark/include \
+	-Iexternal/compile-time-lark/include/ctlark \
+	-Iexternal/compile-time-lark/include/ctll
+
+override CXXFLAGS := $(CXXFLAGS) -std=c++$(CXX_STANDARD) -Iinclude $(SUBMODULE_INCLUDES) $(CONSTEXPR_FLAGS) -O2 -pedantic -Wall -Wextra -Werror -Wconversion
 
 # precompiled header: parsing the YAML grammar text and compiling its
 # tables happens once here instead of once per translation unit
@@ -49,22 +56,14 @@ $(PCH): include/ctyaml.hpp
 clean:
 	rm -f $(OBJECTS) $(DEPENDENCY_FILES) ctyaml.pch include/ctyaml.hpp.gch
 
-# the only generated table left is ctlark's own grammar-of-grammars
-grammar: include/ctlark/lark.hpp
-
-regrammar:
-	@rm -f include/ctlark/lark.hpp
-	@$(MAKE) grammar
-
-include/ctlark/lark.hpp: include/ctlark/lark.gram
-	@echo "LL1q $<"
-	@$(TABLEWRIGHT) --ll --q --input=include/ctlark/lark.gram --output=include/ctlark/ --generator=cpp_ctll_v2 --cfg:fname=lark.hpp --cfg:namespace=ctlark --cfg:guard=CTLARK__LARK__HPP --cfg:grammar_name=lark_grammar
-
 # needs python3 with the quom package
 single-header: single-header/ctyaml.hpp
 
 single-header/ctyaml.hpp:
-	$(PYTHON) -m quom include/ctyaml.hpp ctyaml.hpp.tmp
+	$(PYTHON) -m quom include/ctyaml.hpp ctyaml.hpp.tmp \
+		-I external/compile-time-lark/include \
+		-I external/compile-time-lark/include/ctlark \
+		-I external/compile-time-lark/include/ctll
 	echo "/*" > single-header/ctyaml.hpp
 	cat LICENSE >> single-header/ctyaml.hpp
 	echo "*/" >> single-header/ctyaml.hpp

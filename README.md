@@ -240,9 +240,15 @@ clang:  -fconstexpr-steps=500000000 -fconstexpr-depth=1024 -fbracket-depth=2048
 gcc:    -fconstexpr-ops-limit=3000000000 -fconstexpr-loop-limit=10000000 -fconstexpr-depth=1024
 ```
 
-The only generated parse table left in the tree is ctlark's own
-`lark.hpp` (the grammar of the Lark grammar language); regenerate it
-after editing `lark.gram` with `make regrammar`.
+ctlark and ctll come in as a git submodule
+(`external/compile-time-lark` — clone with `--recurse-submodules` or
+run `git submodule update --init`); the builds add the extra include
+directories so the headers' relative `"../ctlark.hpp"`-style includes
+resolve, and the CMake install flattens everything back to
+`include/{ctyaml,ctlark,ctll}`. The only generated parse table,
+ctlark's own `lark.hpp` (the grammar of the Lark grammar language),
+lives there too; regenerate it in compile-time-lark with its
+`make regrammar`.
 
 ## Building and integrating
 
@@ -271,10 +277,12 @@ TGZ/ZIP archives (plus DEB/RPM where the tooling exists), and
 (experimental; needs CMake 3.30+, a modules-capable toolchain and
 `import std`).
 
-**No build system:** add `include/` to your include path, or copy the
-amalgamated [`single-header/ctyaml.hpp`](single-header/ctyaml.hpp)
-(regenerate with `make single-header`, which needs the
-[quom](https://pypi.org/project/quom/) tool).
+**No build system:** add `include/` and the three submodule include
+directories (`external/compile-time-lark/include{,/ctlark,/ctll}`) to
+your include path, or copy the amalgamated
+[`single-header/ctyaml.hpp`](single-header/ctyaml.hpp) — no submodule,
+no include paths (regenerate with `make single-header`, which needs
+the [quom](https://pypi.org/project/quom/) tool).
 
 Requires C++17 (C++20 for the string-literal API). Runnable demos live
 in [`examples/`](examples/).
@@ -282,6 +290,7 @@ in [`examples/`](examples/).
 Run the tests (compilation is the test — the suite is `static_assert`s):
 
 ```bash
+git submodule update --init            # ctlark + ctll (once, after cloning)
 make CXX=clang++                       # C++20
 make CXX=clang++ CXX_STANDARD=17
 # or through CMake/CTest:
