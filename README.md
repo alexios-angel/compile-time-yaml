@@ -63,11 +63,12 @@ block scalars `|` and `>`, complex keys `? `, multi-document streams
 multi-line flow collections, and tabs anywhere outside quoted scalars
 and comments.
 
-**Documented divergences:** mapping keys are always strings (`get` is
-spelled with the key's text: `get<"true">()`, `get<"80">()`); duplicate
-keys are an error even though YAML merely frowns; a plain scalar
-cannot start with `--`; and a scalar like `k:: v` (an even run of
-colons directly before `: `) must be quoted.
+**Documented divergences:**
+
+- mapping keys are always strings (`get` is spelled with the key's text: `get<"true">()`, `get<"80">()`)
+- duplicate keys are an error even though YAML merely frowns
+- a plain scalar cannot start with `--`
+- and a scalar like `k:: v` (an even run of colons directly before `: `) must be quoted.
 
 ## API
 
