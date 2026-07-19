@@ -142,9 +142,11 @@ Details:
   decoded at parse time (`"\U0001F600"` becomes the four UTF-8 bytes
   of 😀), invalid escapes, surrogate code points and values beyond
   U+10FFFF are errors.
+
 * Numbers keep their raw spelling; `to<T>()` converts on demand —
   hex, octal, exponents and `.inf`/`.nan` included (integral
   conversions truncate fractions, like a cast would).
+
 * Resolution applies to plain VALUES only: `'true'` and `"1"` are
   strings, and `yes`/`no`/`on`/`off` (YAML 1.1 legacy) stay strings
   too.
